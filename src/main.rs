@@ -6,7 +6,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 
-// The “record” part of each post
+/// Represents the *record* portion of a post, containing the
+/// main text and the creation timestamp.
 #[derive(Debug, Deserialize)]
 struct BskyPostRecord {
     text: String,
@@ -14,8 +15,8 @@ struct BskyPostRecord {
     created_at: String,
 }
 
-// A simplified representation of a single Bluesky post response
-// from the hypothetical "searchPosts" xRPC. Adjust fields as needed:
+/// Represents a single Bluesky post from the xRPC response.
+/// “indexedAt” is a top-level timestamp; “record” holds the text.
 #[derive(Debug, Deserialize)]
 struct BskyPost {
     uri: String,
@@ -24,31 +25,35 @@ struct BskyPost {
     record: BskyPostRecord,
 }
 
-// The top-level structure returned by Bluesky search endpoint:
+/// The top-level structure returned by the Bluesky “searchPosts” endpoint.
+/// It contains an array of `BskyPost`s, and possibly a cursor for pagination.
 #[derive(Debug, Deserialize)]
 struct BskySearchPostsResponse {
     #[serde(default)]
     posts: Vec<BskyPost>,
 }
 
-// Session token response from Bluesky (com.atproto.server.createSession).
-// Adjust fields as needed.
+/// Represents the session token retrieved from Bluesky login.
+/// This “accessJwt” is required for subsequent authenticated requests.
 #[derive(Debug, Deserialize)]
 struct BskySession {
-    accessJwt: String, // The token we need for subsequent requests
+    accessJwt: String,
 }
 
-/// Obtain a session token from Bluesky
+/// Logs in to Bluesky and returns a session token (JWT).
+/// The username, password, and base URL are read from environment variables.
 async fn bluesky_login(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
-    // Load from environment
+    // Load credentials from environment
     let username = env::var("BLUESKY_USERNAME")?;
     let password = env::var("BLUESKY_PASSWORD")?;
+    println!("Logging in as {}", username);
     let base_url =
         env::var("BLUESKY_BASE_URL").unwrap_or_else(|_| "https://bsky.social".to_string());
 
+    // Construct the URL for session creation
     let url = format!("{}/xrpc/com.atproto.server.createSession", base_url);
 
-    // Request a session token
+    // Send the login request with JSON body
     let resp = client
         .post(url)
         .json(&json!({
@@ -59,12 +64,14 @@ async fn bluesky_login(client: &Client) -> Result<String, Box<dyn std::error::Er
         .await?
         .error_for_status()?;
 
+    // Deserialize the response to get the session token
     let session: BskySession = resp.json().await?;
     Ok(session.accessJwt)
 }
 
-/// Search Bluesky posts by hashtags (naive approach).
-/// Adjust for the real Bluesky xRPC.
+/// Searches Bluesky posts using a naive hashtag-based query.
+/// Joins the hashtags with spaces (“#tag1 #tag2”) and queries a hypothetical
+/// endpoint “app.bsky.feed.searchPosts”. Returns a list of BskyPost.
 async fn search_bluesky_posts(
     client: &Client,
     token: &str,
@@ -74,73 +81,75 @@ async fn search_bluesky_posts(
     let base_url =
         env::var("BLUESKY_BASE_URL").unwrap_or_else(|_| "https://bsky.social".to_string());
 
-    // The actual Bluesky xRPC for searching posts might require
-    // a certain query param like `q=%23rust` for #rust.
-    // Let's join them with spaces for a naive search approach: "#rust #actix"
-    // Then URL-encode them.
+    // Construct the query by prefixing each hashtag with ‘#’
+    // e.g. ["#rust", "#actix"] => "#rust #actix"
     let joined_query = hashtags
         .iter()
-        .map(|tag| format!("#{}", tag)) // prefix each with '#'
+        .map(|tag| format!("#{}", tag))
         .collect::<Vec<_>>()
         .join(" ");
 
-    // We’ll limit to 50 in total, or user-specified. This is to keep
-    // the search manageable. Some endpoints also have internal max limit.
+    // Limit is capped at 50 to avoid very large requests
     let limit = max_posts.min(50);
 
-    // Hypothetical search endpoint is `app.bsky.feed.searchPosts`.
-    // Adjust for the real one as needed. Example query param: `?q=%23rust+%23actix&limit=50`
+    // Call a hypothetical search endpoint: `app.bsky.feed.searchPosts`
     let url = format!("{}/xrpc/app.bsky.feed.searchPosts", base_url);
 
+    // Perform the GET request, providing the token via Bearer authorization
     let resp = client
         .get(url)
-        .bearer_auth(token) // use session token
+        .bearer_auth(token)
         .query(&[("q", &joined_query), ("limit", &limit.to_string())])
         .send()
         .await?
         .error_for_status()?;
 
+    // For debugging, print out the raw JSON response
     let text = resp.text().await?;
-    println!("Raw response body: {text}");
+    // println!("Raw response body: {text}");
 
-    // Parse the JSON
+    // Deserialize the JSON into our BskySearchPostsResponse
     let mut result: BskySearchPostsResponse = serde_json::from_str(&text)?;
+
+    // Sort posts by “indexed_at” descending (newest first)
     result.posts.sort_by_key(|p| p.indexed_at.clone());
-    result.posts.reverse(); // newest first
+    result.posts.reverse();
+
+    // Return the sorted posts
     Ok(result.posts)
 }
 
+/// Handles GET requests on `/`.
+/// Reads query parameters (?tags=..., ?limit=...), queries Bluesky, and
+/// renders the resulting posts in HTML format.
 #[get("/")]
 async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
-    // The existing HTML content
+    // Basic HTML skeleton
     let main_body = r#"
         <p class="size-h1">Parameters:</p>
     "#;
-
-    // Start with the main body content
     let mut body = String::from(main_body);
 
-    // Append query parameters to the body
+    // Show all query parameters in the HTML
     for (key, value) in query.iter() {
         body.push_str(&format!("<p><strong>{}</strong>: {}</p>", key, value));
     }
 
-    // Now parse out `tags` and `limit`
-    // Using a separate struct is often cleaner, but let's do it inline:
+    // Extract tags and limit from query parameters
     let tags_param = query.get("tags").cloned().unwrap_or_default();
     let limit_param = query
         .get("limit")
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(10); // default to 10 if not present
+        .unwrap_or(10);
 
-    // Split comma-separated list of tags
+    // Split the tags by comma: e.g. "rust,actix" => ["rust", "actix"]
     let tags: Vec<String> = tags_param
         .split(',')
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.trim().to_string())
         .collect();
 
-    // If no tags are provided, just return what we have so far
+    // If no tags are provided, display a short note
     if tags.is_empty() {
         body.push_str("<p>No tags specified, nothing to search for.</p>");
         return HttpResponse::Ok()
@@ -150,27 +159,27 @@ async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
             .body(body);
     }
 
-    // Attempt to talk to Bluesky
-    // In a real app, you'd store the client in AppState to reuse the same client.
+    // Create a new HTTP client (in production, reuse or store it in App State)
     let client = Client::new();
 
-    // We'll attempt to log in and search
+    // Attempt to log in and retrieve a token
     match bluesky_login(&client).await {
         Ok(token) => {
-            // Now search
+            // With a valid token, search for posts
             match search_bluesky_posts(&client, &token, &tags, limit_param).await {
                 Ok(posts) => {
+                    // If no posts were found, inform the user
                     if posts.is_empty() {
                         body.push_str("<p>No posts found for those hashtags.</p>");
                     } else {
+                        // Otherwise, list them
                         body.push_str("<h2>Recent Posts</h2>");
                         for post in posts {
-                            // Render a simple snippet in HTML
                             body.push_str(&format!(
                                 "<div style=\"margin-bottom: 1em;\">
-                                    <p>URI: {}</p>
-                                    <p>Indexed At: {}</p>
-                                    <p>Text: {}</p>
+                                    <p><strong>URI:</strong> {}</p>
+                                    <p><strong>Indexed At:</strong> {}</p>
+                                    <p><strong>Text:</strong> {}</p>
                                 </div>",
                                 post.uri, post.indexed_at, post.record.text
                             ));
@@ -178,11 +187,13 @@ async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
                     }
                 }
                 Err(e) => {
+                    // Handle any search errors
                     body.push_str(&format!("<p>Error searching posts: {}</p>", e.to_string()));
                 }
             }
         }
         Err(e) => {
+            // Handle login errors
             body.push_str(&format!(
                 "<p>Error logging into Bluesky: {}</p>",
                 e.to_string()
@@ -190,6 +201,7 @@ async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
         }
     }
 
+    // Return the final HTML
     HttpResponse::Ok()
         .insert_header(("Widget-Title", "Test"))
         .insert_header(("Widget-Content-Type", "html"))
