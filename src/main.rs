@@ -5,6 +5,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// A single post from "app.bsky.feed.searchPosts".
 /// We capture common fields plus a generic `extra` map for anything unknown.
@@ -110,6 +112,12 @@ struct BskySession {
     access_jwt: String,
 }
 
+/// A small struct to hold our Bluesky token in an Arc<Mutex> so we can share it.
+#[derive(Clone)]
+struct BskyState {
+    token: Arc<Mutex<Option<String>>>,
+}
+
 async fn bluesky_login(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
     // Load creds from environment
     let username = env::var("BLUESKY_USERNAME")?;
@@ -167,7 +175,7 @@ async fn search_bluesky_posts(
 }
 
 #[get("/")]
-async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
+async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyState>) -> impl Responder {
     // A simple HTML skeleton
     let mut body = String::from(
         r#"
@@ -203,44 +211,65 @@ async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
     // Create the HTTP client
     let client = Client::new();
 
-    // Attempt to log in and then search
-    match bluesky_login(&client).await {
-        Ok(token) => match search_bluesky_posts(&client, &token, &tags, limit_param).await {
-            Ok(posts) => {
-                if posts.is_empty() {
-                    body.push_str("<p>No posts found for those hashtags.</p>");
-                } else {
-                    body.push_str("<h2>Recent Posts</h2>");
-
-                    // Render each post
-                    for post in &posts {
-                        let text = post.record.text.clone().unwrap_or_else(|| "<no text>".to_string());
-                        let handle = post
-                            .author
-                            .as_ref()
-                            .and_then(|auth| auth.handle.clone())
-                            .unwrap_or_else(|| "Unknown".to_string());
-
-                        body.push_str(&format!(
-                            r#"<div style="margin-bottom: 1em; padding: 0.5em; border: 1px solid #ccc;">
-                                <p><strong>Handle:</strong> {}</p>
-                                <p><strong>URI:</strong> {}</p>
-                                <p><strong>Indexed At:</strong> {}</p>
-                                <p><strong>Text:</strong> {}</p>
-                                <p><strong>Extra:</strong> {:?}</p>
-                                <p><a href="{}">View on Bluesky</a></p>
-                            </div>"#,
-                            handle, post.uri, post.indexed_at, text, post.extra, post.uri
-                        ));
-                    }
+    // Check if we already have a token cached
+    let mut token_guard = data.token.lock().await;
+    let token = match token_guard.as_ref() {
+        Some(t) => t.clone(), // re-use existing token
+        None => {
+            // Need to log in
+            println!("Logging into Bluesky...");
+            match bluesky_login(&client).await {
+                Ok(t) => {
+                    // Cache it
+                    *token_guard = Some(t.clone());
+                    t
+                }
+                Err(e) => {
+                    body.push_str(&format!("<p>Error logging into Bluesky: {}</p>", e));
+                    return HttpResponse::Ok()
+                        .insert_header(("Widget-Title", "Test"))
+                        .insert_header(("Widget-Content-Type", "html"))
+                        .insert_header(header::ContentType::html())
+                        .body(body);
                 }
             }
-            Err(e) => {
-                body.push_str(&format!("<p>Error searching posts: {}</p>", e));
+        }
+    };
+    drop(token_guard); // Release the lock
+
+    // Attempt to log in and then search
+    match search_bluesky_posts(&client, &token, &tags, limit_param).await {
+        Ok(posts) => {
+            if posts.is_empty() {
+                body.push_str("<p>No posts found for those hashtags.</p>");
+            } else {
+                body.push_str("<h2>Recent Posts</h2>");
+
+                // Render each post
+                for post in &posts {
+                    let text = post.record.text.clone().unwrap_or_else(|| "<no text>".to_string());
+                    let handle = post
+                        .author
+                        .as_ref()
+                        .and_then(|auth| auth.handle.clone())
+                        .unwrap_or_else(|| "Unknown".to_string());
+
+                    body.push_str(&format!(
+                        r#"<div style="margin-bottom: 1em; padding: 0.5em; border: 1px solid #ccc;">
+                            <p><strong>Handle:</strong> {}</p>
+                            <p><strong>URI:</strong> {}</p>
+                            <p><strong>Indexed At:</strong> {}</p>
+                            <p><strong>Text:</strong> {}</p>
+                            <p><strong>Extra:</strong> {:?}</p>
+                            <p><a href="{}">View on Bluesky</a></p>
+                        </div>"#,
+                        handle, post.uri, post.indexed_at, text, post.extra, post.uri
+                    ));
+                }
             }
-        },
+        }
         Err(e) => {
-            body.push_str(&format!("<p>Error logging into Bluesky: {}</p>", e));
+            body.push_str(&format!("<p>Error searching posts: {}</p>", e));
         }
     }
 
@@ -254,5 +283,11 @@ async fn index(query: web::Query<HashMap<String, String>>) -> impl Responder {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
-    HttpServer::new(|| App::new().service(index)).bind(("0.0.0.0", 8080))?.run().await
+    let bsky_state = BskyState {
+        token: Arc::new(Mutex::new(None)),
+    };
+    HttpServer::new(move || App::new().app_data(web::Data::new(bsky_state.clone())).service(index))
+        .bind(("0.0.0.0", 8080))?
+        .run()
+        .await
 }
