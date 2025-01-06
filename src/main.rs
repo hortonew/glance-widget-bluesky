@@ -259,12 +259,7 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
 #[get("/")]
 async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyState>) -> impl Responder {
     let params = parse_params(&query);
-    let mut body = build_html_header(
-        &params.text_color,
-        &params.author_color,
-        &params.text_hover_color,
-        &params.author_hover_color,
-    );
+    let mut body = build_html_header(&params);
 
     if params.debug {
         show_debug_params(&query, &mut body);
@@ -289,7 +284,7 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
     widget_response(body)
 }
 
-fn build_html_header(text_color: &str, author_color: &str, text_hover_color: &str, author_hover_color: &str) -> String {
+fn build_html_header(params: &Params) -> String {
     format!(
         r#"<!DOCTYPE html>
     <html>
@@ -332,10 +327,10 @@ fn build_html_header(text_color: &str, author_color: &str, text_hover_color: &st
     </head>
     <body>
     "#,
-        text_color = text_color,
-        text_hover_color = text_hover_color,
-        author_color = author_color,
-        author_hover_color = author_hover_color
+        text_color = params.text_color,
+        text_hover_color = params.text_hover_color,
+        author_color = params.author_color,
+        author_hover_color = params.author_hover_color
     )
 }
 
