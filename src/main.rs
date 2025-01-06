@@ -247,23 +247,28 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
 
                 // Render each post
                 for post in &posts {
-                    let text = post.record.text.clone().unwrap_or_else(|| "<no text>".to_string());
-                    let handle = post
-                        .author
-                        .as_ref()
-                        .and_then(|auth| auth.handle.clone())
-                        .unwrap_or_else(|| "Unknown".to_string());
+                    // The post text:
+                    let text = post.record.text.as_deref().unwrap_or("<no text>");
 
+                    // The author’s handle (e.g. "erikhorton.bsky.social")
+                    let handle_str = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
+
+                    // e.g. "at://did:plc:u3dknadazu5mywf5i6qedz3d/app.bsky.feed.post/3lez2wt36q226"
+                    // We want "3lez2wt36q226"
+                    let rkey = post.uri.split('/').last().unwrap_or("");
+
+                    // Construct the clickable link:
+                    // https://bsky.app/profile/erikhorton.bsky.social/post/3lez2wt36q226
+                    let link = format!("https://bsky.app/profile/{}/post/{}", handle_str, rkey);
+                    let author_link = format!("https://bsky.app/profile/{}", handle_str);
+
+                    // Generate a small HTML snippet
                     body.push_str(&format!(
                         r#"<div style="margin-bottom: 1em; padding: 0.5em; border: 1px solid #ccc;">
-                            <p><strong>Handle:</strong> {}</p>
-                            <p><strong>URI:</strong> {}</p>
-                            <p><strong>Indexed At:</strong> {}</p>
-                            <p><strong>Text:</strong> {}</p>
-                            <p><strong>Extra:</strong> {:?}</p>
-                            <p><a href="{}">View on Bluesky</a></p>
-                        </div>"#,
-                        handle, post.uri, post.indexed_at, text, post.extra, post.uri
+                             <p><strong>Author:</strong> <a href="{}">{}</a></p>
+                             <p><a href="{}">{}</a></p>
+                         </div>"#,
+                        author_link, handle_str, link, text
                     ));
                 }
             }
