@@ -16,13 +16,13 @@ use chrono::{DateTime, Duration, Utc}; // Add or ensure these are imported
 #[derive(Debug, Deserialize)]
 struct BskyPost {
     uri: String,
-    cid: Option<String>, // new field
+    cid: Option<String>,
     #[serde(rename = "indexedAt")]
     indexed_at: String,
-    author: Option<BskyAuthor>, // we can parse author details
-    record: BskyPostRecord,     // the actual text, timestamps, etc.
+    author: Option<BskyAuthor>,
+    record: BskyPostRecord, // the actual text, timestamps, etc.
     #[serde(rename = "repostCount")]
-    repost_count: Option<u32>, // example extra fields
+    repost_count: Option<u32>,
     #[serde(rename = "replyCount")]
     reply_count: Option<u32>,
     #[serde(rename = "likeCount")]
@@ -30,8 +30,6 @@ struct BskyPost {
     #[serde(rename = "quoteCount")]
     quote_count: Option<u32>,
 
-    /// Some fields like "viewer", "labels", or "embed" can be typed further,
-    /// but for illustration, let's store them generically here.
     #[serde(default)]
     viewer: Value,
     #[serde(default)]
@@ -56,9 +54,9 @@ struct BskyAuthor {
     avatar: Option<String>,
 
     #[serde(default)]
-    associated: Value, // e.g. "associated": { ... }
+    associated: Value,
     #[serde(default)]
-    labels: Value, // could be typed further
+    labels: Value,
 
     // Flatten anything else
     #[serde(flatten)]
@@ -78,13 +76,13 @@ struct BskyPostRecord {
     created_at: Option<String>,
 
     #[serde(default)]
-    embed: Value, // could be typed if you need the "app.bsky.embed.*" shape
+    embed: Value,
     #[serde(default)]
-    facets: Value, // array of link/mention/tag references
+    facets: Value,
     #[serde(default)]
-    langs: Value, // array of language codes
+    langs: Value,
     #[serde(default)]
-    reply: Value, // sometimes has the parent & root replies
+    reply: Value,
 
     // Flatten anything else (like "text", "createdAt", etc. we didn't define)
     #[serde(flatten)]
