@@ -1,8 +1,7 @@
 use actix_web::{get, http::header, web, App, HttpResponse, HttpServer, Responder};
 use dotenv::dotenv;
 use reqwest::Client;
-use serde::Deserialize;
-use serde_json::{json, Value};
+
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -10,113 +9,12 @@ use tokio::sync::Mutex;
 
 use chrono::{DateTime, Duration, Utc}; // Add or ensure these are imported
 
-/// A single post from "app.bsky.feed.searchPosts".
-/// We capture common fields plus a generic `extra` map for anything unknown.
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct BskyPost {
-    uri: String,
-    cid: Option<String>,
-    #[serde(rename = "indexedAt")]
-    indexed_at: String,
-    author: Option<BskyAuthor>,
-    record: BskyPostRecord, // the actual text, timestamps, etc.
-    #[serde(rename = "repostCount")]
-    repost_count: Option<u32>,
-    #[serde(rename = "replyCount")]
-    reply_count: Option<u32>,
-    #[serde(rename = "likeCount")]
-    like_count: Option<u32>,
-    #[serde(rename = "quoteCount")]
-    quote_count: Option<u32>,
+mod post;
+use post::{BskyPost, BskySearchPostsResponse};
 
-    #[serde(default)]
-    viewer: Value,
-    #[serde(default)]
-    labels: Value,
-    #[serde(default)]
-    embed: Value,
-
-    /// Flatten any fields we didn’t explicitly define so we don’t lose them.
-    /// This makes debugging easier if new fields appear in the JSON.
-    #[serde(flatten)]
-    extra: HashMap<String, Value>,
-}
-
-/// The “author” sub-object (e.g., who posted it).
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct BskyAuthor {
-    did: Option<String>,
-    handle: Option<String>,
-    #[serde(rename = "displayName")]
-    display_name: Option<String>,
-    avatar: Option<String>,
-
-    #[serde(default)]
-    associated: Value,
-    #[serde(default)]
-    labels: Value,
-
-    // Flatten anything else
-    #[serde(flatten)]
-    extra: HashMap<String, Value>,
-}
-
-/// The “record” part of each post (contains the main text, facets, etc.).
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct BskyPostRecord {
-    /// This is often present in Bluesky objects:
-    #[serde(rename = "$type")]
-    record_type: Option<String>,
-
-    text: Option<String>,
-    #[serde(rename = "createdAt")]
-    created_at: Option<String>,
-
-    #[serde(default)]
-    embed: Value,
-    #[serde(default)]
-    facets: Value,
-    #[serde(default)]
-    langs: Value,
-    #[serde(default)]
-    reply: Value,
-
-    // Flatten anything else (like "text", "createdAt", etc. we didn't define)
-    #[serde(flatten)]
-    extra: HashMap<String, Value>,
-}
-
-/// The top-level structure for the "searchPosts" response
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct BskySearchPostsResponse {
-    #[serde(default)]
-    posts: Vec<BskyPost>,
-
-    /// For pagination, if present
-    #[serde(default)]
-    cursor: Option<String>,
-
-    // Flatten anything else
-    #[serde(flatten)]
-    extra: HashMap<String, Value>,
-}
-
-/// Represents the session token retrieved from Bluesky login.
-#[derive(Debug, Deserialize)]
-struct BskySession {
-    #[serde(rename = "accessJwt")]
-    access_jwt: String,
-}
-
-/// A small struct to hold our Bluesky token in an Arc<Mutex> so we can share it.
-#[derive(Clone)]
-struct BskyState {
-    token: Arc<Mutex<Option<String>>>,
-}
+mod auth;
+use auth::ensure_bsky_token;
+use auth::BskyState;
 
 fn parse_relative_time(spec: &str) -> Option<DateTime<Utc>> {
     if !spec.starts_with('-') || spec.len() < 3 {
@@ -138,27 +36,6 @@ fn parse_relative_time(spec: &str) -> Option<DateTime<Utc>> {
 
     // Return "now - duration"
     Some(Utc::now() - duration)
-}
-
-async fn bluesky_login(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
-    // Load creds from environment
-    let username = env::var("BLUESKY_USERNAME")?;
-    let password = env::var("BLUESKY_PASSWORD")?;
-    let base_url = env::var("BLUESKY_BASE_URL").unwrap_or_else(|_| "https://bsky.social".to_string());
-
-    let url = format!("{}/xrpc/com.atproto.server.createSession", base_url);
-
-    // Send the login request
-    let resp = client
-        .post(url)
-        .json(&json!({ "identifier": username, "password": password }))
-        .send()
-        .await?
-        .error_for_status()?;
-
-    // Deserialize to get the session token
-    let session: BskySession = resp.json().await?;
-    Ok(session.access_jwt)
 }
 
 /// Searches Bluesky posts by a naive hashtag approach.
@@ -338,23 +215,6 @@ fn show_debug_params(query: &HashMap<String, String>, body: &mut String) {
     body.push_str(r#"<p class="size-h1">Parameters:</p>"#);
     for (key, value) in query.iter() {
         body.push_str(&format!("<p><strong>{}:</strong> {}</p>", key, value));
-    }
-}
-
-async fn ensure_bsky_token(client: &Client, data: &web::Data<BskyState>, body: &mut String) -> Option<String> {
-    let mut token_guard = data.token.lock().await;
-    if let Some(t) = token_guard.as_ref() {
-        return Some(t.clone());
-    }
-    match bluesky_login(client).await {
-        Ok(t) => {
-            *token_guard = Some(t.clone());
-            Some(t)
-        }
-        Err(e) => {
-            body.push_str(&format!("<p>Error logging into Bluesky: {}</p>", e));
-            None
-        }
     }
 }
 
