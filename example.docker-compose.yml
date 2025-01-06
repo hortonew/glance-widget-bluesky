@@ -1,0 +1,20 @@
+services:
+  glance:
+    image: glanceapp/glance
+    volumes:
+      - ./glance.yml:/app/glance.yml
+    ports:
+      - 32789:8080
+    environment:
+      - TZ=America/Denver
+    dns:
+      - 1.1.1.1
+    restart: unless-stopped
+
+  glance-bluesky-widget:
+    build:
+      context: /volume1/docker/docker-compose/media/glance-bluesky-widget
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
