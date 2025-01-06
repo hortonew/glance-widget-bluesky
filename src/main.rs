@@ -176,38 +176,88 @@ async fn search_bluesky_posts(
 
 #[get("/")]
 async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyState>) -> impl Responder {
-    let mut body = String::from(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8"/>
-    <title>Bluesky Hashtag Viewer</title>
-    <style>
-        /* Make links look like normal text, but lighten on hover */
-        a {
-            color: inherit;        /* inherit color from parent (so it looks like plain text) */
-            text-decoration: none; /* remove underline */
-        }
-        a:hover {
-            color: #888;          /* or some lighter color */
-            text-decoration: underline; /* or keep no underline if you prefer */
-        }
-    </style>
-</head>
-<body>
-"#,
-    );
-
-    body.push_str(r#"<p class="size-h1">Parameters:</p>"#);
-
-    // Show all query parameters
-    for (key, value) in query.iter() {
-        body.push_str(&format!("<p><strong>{}:</strong> {}</p>", key, value));
-    }
-
     // Extract tags=... and limit=...
     let tags_param = query.get("tags").cloned().unwrap_or_default();
     let limit_param = query.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+    let debug_param = query.get("debug").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let text_color = query
+        .get("text_color")
+        .and_then(|s| s.parse::<String>().ok())
+        .unwrap_or("000000".to_string());
+    let author_color = query
+        .get("author_color")
+        .and_then(|s| s.parse::<String>().ok())
+        .unwrap_or("666".to_string());
+    let text_hover_color = query
+        .get("text_hover_color")
+        .and_then(|s| s.parse::<String>().ok())
+        .unwrap_or("000000".to_string());
+    let author_hover_color = query
+        .get("author_hover_color")
+        .and_then(|s| s.parse::<String>().ok())
+        .unwrap_or("666".to_string());
+
+    let mut body = format!(
+        r#"<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8"/>
+        <title>Bluesky Hashtag Viewer</title>
+        <style>
+            /* Container around each post */
+            .post-container {{
+                margin-bottom: 1em;
+                padding: 0.5em;
+                border: 1px solid #ccc;
+                text-align: left; /* ensure left alignment */
+            }}
+            /* Main post text */
+            .post-text {{
+                margin: 0;
+                font-size: 1em; /* normal font size */
+            }}
+
+            .post-text a {{
+                color: #{text_color};
+                text-decoration: none;
+            }}
+            .post-text a:hover {{
+                color: #{text_hover_color};
+                text-decoration: none;
+            }}
+
+            /* Author line (small text) */
+            .post-author {{
+                margin: 0.25em 0 0 0;
+                font-size: 0.85em;
+                color: #{author_color};
+            }}
+            .post-author a {{
+                color: inherit;
+                text-decoration: none;
+            }}
+            .post-author a:hover {{
+                color: #{author_hover_color};
+                text-decoration: none;
+            }}
+        </style>
+    </head>
+    <body>
+    "#,
+        text_color = text_color,
+        text_hover_color = text_hover_color,
+        author_color = author_color,
+        author_hover_color = author_hover_color
+    );
+
+    if debug_param {
+        body.push_str(r#"<p class="size-h1">Parameters:</p>"#);
+
+        // Show all query parameters
+        for (key, value) in query.iter() {
+            body.push_str(&format!("<p><strong>{}:</strong> {}</p>", key, value));
+        }
+    }
 
     // Split comma-separated tags
     let tags: Vec<String> = tags_param
@@ -217,7 +267,7 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
         .collect();
 
     if tags.is_empty() {
-        body.push_str("<p>No tags specified. Try ?tags=rust,actix</p>");
+        body.push_str("<p>No tags specified. Try ?tags=rust,actix&limit=5</p>");
         return HttpResponse::Ok()
             .insert_header(("Widget-Title", "Test"))
             .insert_header(("Widget-Content-Type", "html"))
@@ -264,28 +314,19 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
 
                 // Render each post
                 for post in &posts {
-                    // The post text:
-                    let text = post.record.text.as_deref().unwrap_or("<no text>");
-
-                    // The author’s handle (e.g. "erikhorton.bsky.social")
-                    let handle_str = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
-
-                    // e.g. "at://did:plc:u3dknadazu5mywf5i6qedz3d/app.bsky.feed.post/3lez2wt36q226"
-                    // We want "3lez2wt36q226"
+                    let post_text = post.record.text.as_deref().unwrap_or("<no text>");
+                    let author_handle = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
                     let rkey = post.uri.split('/').last().unwrap_or("");
-
-                    // Construct the clickable link:
-                    // https://bsky.app/profile/erikhorton.bsky.social/post/3lez2wt36q226
-                    let link = format!("https://bsky.app/profile/{}/post/{}", handle_str, rkey);
-                    let author_link = format!("https://bsky.app/profile/{}", handle_str);
-
-                    // Generate a small HTML snippet
+                    let post_link = format!("https://bsky.app/profile/{}/post/{}", author_handle, rkey);
+                    let author_link = format!("https://bsky.app/profile/{}", author_handle);
                     body.push_str(&format!(
-                        r#"<div style="margin-bottom: 1em; padding: 0.5em; border: 1px solid #ccc;">
-                             <p><strong>Author:</strong> <a href="{}">{}</a></p>
-                             <p><a href="{}">{}</a></p>
-                         </div>"#,
-                        author_link, handle_str, link, text
+                        r#"<div class="post-container">
+                             <p class="post-text"><a href="{}">{}</a></p>
+                             <p class="post-author">
+                               <a href="{}">{}</a>
+                             </p>
+                           </div>"#,
+                        post_link, post_text, author_link, author_handle
                     ));
                 }
             }
