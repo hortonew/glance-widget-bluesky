@@ -206,59 +206,107 @@ async fn search_bluesky_posts(
     Ok(result.posts)
 }
 
-#[get("/")]
-async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyState>) -> impl Responder {
-    // Extract tags=... and limit=...
+struct Params {
+    tags: Vec<String>,
+    limit: usize,
+    debug: bool,
+    text_color: String,
+    author_color: String,
+    text_hover_color: String,
+    author_hover_color: String,
+    maybe_since_time: Option<DateTime<Utc>>,
+}
+
+fn parse_params(query: &HashMap<String, String>) -> Params {
     let tags_param = query.get("tags").cloned().unwrap_or_default();
-    let limit_param = query.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
-    let debug_param = query.get("debug").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
-    let text_color = query
-        .get("text_color")
-        .and_then(|s| s.parse::<String>().ok())
-        .unwrap_or("000000".to_string());
-    let author_color = query
-        .get("author_color")
-        .and_then(|s| s.parse::<String>().ok())
-        .unwrap_or("666".to_string());
-    let text_hover_color = query
-        .get("text_hover_color")
-        .and_then(|s| s.parse::<String>().ok())
-        .unwrap_or("000000".to_string());
-    let author_hover_color = query
-        .get("author_hover_color")
-        .and_then(|s| s.parse::<String>().ok())
-        .unwrap_or("666".to_string());
-
-    // e.g. ?since=-10d
+    let limit = query.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+    let debug = query.get("debug").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let text_color = query.get("text_color").cloned().unwrap_or("000000".to_string());
+    let author_color = query.get("author_color").cloned().unwrap_or("666".to_string());
+    let text_hover_color = query.get("text_hover_color").cloned().unwrap_or("000000".to_string());
+    let author_hover_color = query.get("author_hover_color").cloned().unwrap_or("666".to_string());
     let since_param = query.get("since").cloned().unwrap_or_default();
-
-    // Try to parse something like "-10d"
     let maybe_since_time = if !since_param.is_empty() {
         parse_relative_time(&since_param)
     } else {
         None
     };
 
-    let mut body = format!(
+    let tags: Vec<String> = tags_param
+        .split(',')
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect();
+
+    Params {
+        tags,
+        limit,
+        debug,
+        text_color,
+        author_color,
+        text_hover_color,
+        author_hover_color,
+        maybe_since_time,
+    }
+}
+
+#[get("/")]
+async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyState>) -> impl Responder {
+    let params = parse_params(&query);
+    let mut body = build_html_header(
+        &params.text_color,
+        &params.author_color,
+        &params.text_hover_color,
+        &params.author_hover_color,
+    );
+
+    if params.debug {
+        show_debug_params(&query, &mut body);
+    }
+
+    if params.tags.is_empty() {
+        body.push_str("<p>No tags specified. Try ?tags=rust,actix&limit=5</p>");
+        return widget_response(body);
+    }
+
+    let client = Client::new();
+    let token = match ensure_bsky_token(&client, &data, &mut body).await {
+        Some(t) => t,
+        None => return widget_response(body),
+    };
+
+    match search_bluesky_posts(&client, &token, &params.tags, params.limit, params.maybe_since_time).await {
+        Ok(posts) => build_posts_html(&posts, &mut body),
+        Err(e) => body.push_str(&format!("<p>Error searching posts: {}</p>", e)),
+    }
+
+    widget_response(body)
+}
+
+fn build_html_header(text_color: &str, author_color: &str, text_hover_color: &str, author_hover_color: &str) -> String {
+    format!(
         r#"<!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8"/>
         <title>Bluesky Hashtag Viewer</title>
         <style>
-            /* Container around each post */
             .post-container {{
                 margin-bottom: 1em;
                 padding: 0.5em;
                 border: 1px solid #ccc;
-                text-align: left; /* ensure left alignment */
+                text-align: left;
             }}
-            /* Main post text */
             .post-text {{
                 margin: 0;
-                font-size: 1em; /* normal font size */
+                font-size: 1em;
             }}
-
             .post-text a {{
                 color: #{text_color};
                 text-decoration: none;
@@ -267,8 +315,6 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
                 color: #{text_hover_color};
                 text-decoration: none;
             }}
-
-            /* Author line (small text) */
             .post-author {{
                 margin: 0.25em 0 0 0;
                 font-size: 0.85em;
@@ -290,98 +336,61 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
         text_hover_color = text_hover_color,
         author_color = author_color,
         author_hover_color = author_hover_color
-    );
+    )
+}
 
-    if debug_param {
-        body.push_str(r#"<p class="size-h1">Parameters:</p>"#);
-
-        // Show all query parameters
-        for (key, value) in query.iter() {
-            body.push_str(&format!("<p><strong>{}:</strong> {}</p>", key, value));
-        }
+fn show_debug_params(query: &HashMap<String, String>, body: &mut String) {
+    body.push_str(r#"<p class="size-h1">Parameters:</p>"#);
+    for (key, value) in query.iter() {
+        body.push_str(&format!("<p><strong>{}:</strong> {}</p>", key, value));
     }
+}
 
-    // Split comma-separated tags
-    let tags: Vec<String> = tags_param
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_string())
-        .collect();
-
-    if tags.is_empty() {
-        body.push_str("<p>No tags specified. Try ?tags=rust,actix&limit=5</p>");
-        return HttpResponse::Ok()
-            .insert_header(("Widget-Title", "Test"))
-            .insert_header(("Widget-Content-Type", "html"))
-            .insert_header(header::ContentType::html())
-            .body(body);
-    }
-
-    // Create the HTTP client
-    let client = Client::new();
-
-    // Check if we already have a token cached
+async fn ensure_bsky_token(client: &Client, data: &web::Data<BskyState>, body: &mut String) -> Option<String> {
     let mut token_guard = data.token.lock().await;
-    let token = match token_guard.as_ref() {
-        Some(t) => t.clone(), // re-use existing token
-        None => {
-            // Need to log in
-            println!("Logging into Bluesky...");
-            match bluesky_login(&client).await {
-                Ok(t) => {
-                    // Cache it
-                    *token_guard = Some(t.clone());
-                    t
-                }
-                Err(e) => {
-                    body.push_str(&format!("<p>Error logging into Bluesky: {}</p>", e));
-                    return HttpResponse::Ok()
-                        .insert_header(("Widget-Title", "Test"))
-                        .insert_header(("Widget-Content-Type", "html"))
-                        .insert_header(header::ContentType::html())
-                        .body(body);
-                }
-            }
-        }
-    };
-    drop(token_guard); // Release the lock
-
-    // Attempt to log in and then search
-    match search_bluesky_posts(&client, &token, &tags, limit_param, maybe_since_time).await {
-        Ok(posts) => {
-            if posts.is_empty() {
-                body.push_str("<p>No posts found for those hashtags.</p>");
-            } else {
-                body.push_str("<h2>Recent Posts</h2>");
-
-                // Render each post
-                for post in &posts {
-                    let post_text = post.record.text.as_deref().unwrap_or("<no text>");
-                    let author_handle = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
-                    let rkey = post.uri.split('/').last().unwrap_or("");
-                    let post_link = format!("https://bsky.app/profile/{}/post/{}", author_handle, rkey);
-                    let author_link = format!("https://bsky.app/profile/{}", author_handle);
-                    let created_at = post.record.created_at.as_deref().unwrap_or("<unknown date>");
-
-                    body.push_str(&format!(
-                        r#"<div class="post-container">
-                             <p class="post-text"><a href="{}">{}</a></p>
-                             <p class="post-author">
-                               <a href="{}">{}</a>
-                               &nbsp;&middot;&nbsp;
-                               {}
-                             </p>
-                           </div>"#,
-                        post_link, post_text, author_link, author_handle, created_at
-                    ));
-                }
-            }
+    if let Some(t) = token_guard.as_ref() {
+        return Some(t.clone());
+    }
+    match bluesky_login(client).await {
+        Ok(t) => {
+            *token_guard = Some(t.clone());
+            Some(t)
         }
         Err(e) => {
-            body.push_str(&format!("<p>Error searching posts: {}</p>", e));
+            body.push_str(&format!("<p>Error logging into Bluesky: {}</p>", e));
+            None
         }
     }
+}
 
+fn build_posts_html(posts: &[BskyPost], body: &mut String) {
+    if posts.is_empty() {
+        body.push_str("<p>No posts found for those hashtags.</p>");
+    } else {
+        body.push_str("<h2>Recent Posts</h2>");
+        for post in posts {
+            let post_text = post.record.text.as_deref().unwrap_or("<no text>");
+            let author_handle = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
+            let rkey = post.uri.split('/').last().unwrap_or("");
+            let post_link = format!("https://bsky.app/profile/{}/post/{}", author_handle, rkey);
+            let author_link = format!("https://bsky.app/profile/{}", author_handle);
+            let created_at = post.record.created_at.as_deref().unwrap_or("<unknown date>");
+            body.push_str(&format!(
+                r#"<div class="post-container">
+                     <p class="post-text"><a href="{}">{}</a></p>
+                     <p class="post-author">
+                       <a href="{}">{}</a>
+                       &nbsp;&middot;&nbsp;
+                       {}
+                     </p>
+                   </div>"#,
+                post_link, post_text, author_link, author_handle, created_at
+            ));
+        }
+    }
+}
+
+fn widget_response(body: String) -> HttpResponse {
     HttpResponse::Ok()
         .insert_header(("Widget-Title", "Test"))
         .insert_header(("Widget-Content-Type", "html"))
