@@ -176,12 +176,29 @@ async fn search_bluesky_posts(
 
 #[get("/")]
 async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyState>) -> impl Responder {
-    // A simple HTML skeleton
     let mut body = String::from(
-        r#"
-        <p class="size-h1">Parameters:</p>
-    "#,
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Bluesky Hashtag Viewer</title>
+    <style>
+        /* Make links look like normal text, but lighten on hover */
+        a {
+            color: inherit;        /* inherit color from parent (so it looks like plain text) */
+            text-decoration: none; /* remove underline */
+        }
+        a:hover {
+            color: #888;          /* or some lighter color */
+            text-decoration: underline; /* or keep no underline if you prefer */
+        }
+    </style>
+</head>
+<body>
+"#,
     );
+
+    body.push_str(r#"<p class="size-h1">Parameters:</p>"#);
 
     // Show all query parameters
     for (key, value) in query.iter() {
