@@ -7,7 +7,7 @@ use std::env;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use chrono::{DateTime, Duration, Utc}; // Add or ensure these are imported
+use chrono::{DateTime, Duration, Utc};
 
 mod post;
 use post::{BskyPost, BskySearchPostsResponse};
@@ -45,6 +45,7 @@ async fn search_bluesky_posts(
     hashtags: &[String],
     max_posts: usize,
     maybe_since_time: Option<DateTime<Utc>>,
+    sort: &str,
 ) -> Result<Vec<BskyPost>, Box<dyn std::error::Error>> {
     let base_url = env::var("BLUESKY_BASE_URL").unwrap_or_else(|_| "https://bsky.social".to_string());
 
@@ -66,7 +67,7 @@ async fn search_bluesky_posts(
     let resp = client
         .get(url)
         .bearer_auth(token)
-        .query(&[("q", &joined_query), ("limit", &limit.to_string())])
+        .query(&[("q", &joined_query), ("limit", &limit.to_string()), ("sort", &sort.to_string())])
         .send()
         .await?
         .error_for_status()?;
@@ -92,6 +93,8 @@ struct Params {
     text_hover_color: String,
     author_hover_color: String,
     maybe_since_time: Option<DateTime<Utc>>,
+    sort: String,
+    title: String,
 }
 
 fn parse_params(query: &HashMap<String, String>) -> Params {
@@ -108,6 +111,9 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
     } else {
         None
     };
+
+    let sort = query.get("sort").cloned().unwrap_or("latest".to_string());
+    let title = query.get("title").cloned().unwrap_or("Bluesky".to_string());
 
     let tags: Vec<String> = tags_param
         .split(',')
@@ -130,6 +136,8 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
         text_hover_color,
         author_hover_color,
         maybe_since_time,
+        sort,
+        title,
     }
 }
 
@@ -144,21 +152,21 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
 
     if params.tags.is_empty() {
         body.push_str("<p>No tags specified. Try ?tags=rust,actix&limit=5</p>");
-        return widget_response(body);
+        return widget_response(body, &params.title);
     }
 
     let client = Client::new();
     let token = match ensure_bsky_token(&client, &data, &mut body).await {
         Some(t) => t,
-        None => return widget_response(body),
+        None => return widget_response(body, &params.title),
     };
 
-    match search_bluesky_posts(&client, &token, &params.tags, params.limit, params.maybe_since_time).await {
+    match search_bluesky_posts(&client, &token, &params.tags, params.limit, params.maybe_since_time, &params.sort).await {
         Ok(posts) => build_posts_html(&posts, &mut body),
         Err(e) => body.push_str(&format!("<p>Error searching posts: {}</p>", e)),
     }
 
-    widget_response(body)
+    widget_response(body, &params.title)
 }
 
 fn build_html_header(params: &Params) -> String {
@@ -200,6 +208,19 @@ fn build_html_header(params: &Params) -> String {
                 color: #{author_hover_color};
                 text-decoration: none;
             }}
+            .post-stats {{
+                margin: 0.25em 0 0 0;
+                font-size: 0.85em;
+                color: #{author_color};
+            }}
+            .post-stats a {{
+                color: inherit;
+                text-decoration: none;
+            }}
+            .post-stats a:hover {{
+                color: #{author_hover_color};
+                text-decoration: none;
+            }}
         </style>
     </head>
     <body>
@@ -222,7 +243,7 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String) {
     if posts.is_empty() {
         body.push_str("<p>No posts found for those hashtags.</p>");
     } else {
-        body.push_str("<h2>Recent Posts</h2>");
+        // body.push_str("<h2>Recent Posts</h2>");
         for post in posts {
             let post_text = post.record.text.as_deref().unwrap_or("<no text>");
             let author_handle = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
@@ -230,6 +251,10 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String) {
             let post_link = format!("https://bsky.app/profile/{}/post/{}", author_handle, rkey);
             let author_link = format!("https://bsky.app/profile/{}", author_handle);
             let created_at = post.record.created_at.as_deref().unwrap_or("<unknown date>");
+            let like_count = post.like_count.unwrap_or(0);
+            let quote_count = post.quote_count.unwrap_or(0);
+            let reply_count = post.reply_count.unwrap_or(0);
+            let repost_count = post.repost_count.unwrap_or(0);
             body.push_str(&format!(
                 r#"<div class="post-container">
                      <p class="post-text"><a href="{}">{}</a></p>
@@ -238,16 +263,22 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String) {
                        &nbsp;&middot;&nbsp;
                        {}
                      </p>
+                     <p class="post-stats">
+                       Likes: {} &nbsp;&middot;&nbsp;
+                       Quotes: {} &nbsp;&middot;&nbsp;
+                       Replies: {} &nbsp;&middot;&nbsp;
+                       Reposts: {}
+                     </p>
                    </div>"#,
-                post_link, post_text, author_link, author_handle, created_at
+                post_link, post_text, author_link, author_handle, created_at, like_count, quote_count, reply_count, repost_count
             ));
         }
     }
 }
 
-fn widget_response(body: String) -> HttpResponse {
+fn widget_response(body: String, title: &str) -> HttpResponse {
     HttpResponse::Ok()
-        .insert_header(("Widget-Title", "Test"))
+        .insert_header(("Widget-Title", title))
         .insert_header(("Widget-Content-Type", "html"))
         .insert_header(header::ContentType::html())
         .body(body)
@@ -255,10 +286,13 @@ fn widget_response(body: String) -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    println!("Starting Bluesky widget server");
     dotenv().ok();
+    println!("Loaded environment");
     let bsky_state = BskyState {
         token: Arc::new(Mutex::new(None)),
     };
+    println!("Loaded Bluesky state");
     HttpServer::new(move || App::new().app_data(web::Data::new(bsky_state.clone())).service(index))
         .bind(("0.0.0.0", 8080))?
         .run()

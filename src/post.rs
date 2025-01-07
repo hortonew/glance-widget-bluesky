@@ -7,6 +7,7 @@ use std::collections::HashMap;
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct BskyPost {
+    // example: https://jsonblob.com/1326024085142167552
     pub uri: String,
     cid: Option<String>,
     #[serde(rename = "indexedAt")]
@@ -14,13 +15,13 @@ pub struct BskyPost {
     pub author: Option<BskyAuthor>,
     pub record: BskyPostRecord, // the actual text, timestamps, etc.
     #[serde(rename = "repostCount")]
-    repost_count: Option<u32>,
+    pub repost_count: Option<u32>,
     #[serde(rename = "replyCount")]
-    reply_count: Option<u32>,
+    pub reply_count: Option<u32>,
     #[serde(rename = "likeCount")]
-    like_count: Option<u32>,
+    pub like_count: Option<u32>,
     #[serde(rename = "quoteCount")]
-    quote_count: Option<u32>,
+    pub quote_count: Option<u32>,
 
     #[serde(default)]
     viewer: Value,
@@ -91,6 +92,9 @@ pub struct BskySearchPostsResponse {
     /// For pagination, if present
     #[serde(default)]
     cursor: Option<String>,
+
+    #[serde(default)]
+    sort: Option<String>,
 
     // Flatten anything else
     #[serde(flatten)]
