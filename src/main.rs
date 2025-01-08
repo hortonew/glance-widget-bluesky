@@ -13,8 +13,7 @@ mod post;
 use post::{BskyPost, BskySearchPostsResponse};
 
 mod auth;
-use auth::ensure_bsky_token;
-use auth::BskyState;
+use auth::{ensure_bsky_token, load_tokens, BskyState};
 
 fn parse_relative_time(spec: &str) -> Option<DateTime<Utc>> {
     if !spec.starts_with('-') || spec.len() < 3 {
@@ -289,9 +288,12 @@ async fn main() -> std::io::Result<()> {
     println!("Starting Bluesky widget server");
     dotenv().ok();
     println!("Loaded environment");
+
+    let initial_token = load_tokens();
     let bsky_state = BskyState {
-        token: Arc::new(Mutex::new(None)),
+        token: Arc::new(Mutex::new(initial_token)),
     };
+
     println!("Loaded Bluesky state");
     HttpServer::new(move || App::new().app_data(web::Data::new(bsky_state.clone())).service(index))
         .bind(("0.0.0.0", 8080))?
