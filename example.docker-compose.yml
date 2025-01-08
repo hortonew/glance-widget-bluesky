@@ -12,9 +12,12 @@ services:
     restart: unless-stopped
 
   glance-bluesky-widget:
-    build:
-      context: /volume1/docker/docker-compose/media/glance-bluesky-widget
-      dockerfile: Dockerfile
+    image: hortonew/glance-bluesky-widget
     ports:
       - "8080:8080"
     restart: unless-stopped
+    # BLUESKY_BASE_URL=
+    # BLUESKY_USERNAME=
+    # BLUESKY_PASSWORD=
+    env_file:
+      - ./.env
