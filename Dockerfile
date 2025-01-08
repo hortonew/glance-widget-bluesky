@@ -1,9 +1,8 @@
 # ---- Stage 1: Build the application ----
 FROM rust:latest as builder
 WORKDIR /app
-COPY Cargo.toml .
-RUN mkdir -p src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
+
+COPY Cargo.toml ./
 COPY src ./src
 RUN cargo build --release
 
