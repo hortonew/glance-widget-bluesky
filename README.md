@@ -2,6 +2,8 @@
 
 This is an [extension](https://github.com/glanceapp/glance/blob/main/docs/configuration.md#extension) to [Glance](https://github.com/glanceapp/glance/tree/main), enabling you to grab content from Bluesky and display it on your dashboard.
 
+![Selfhosted](/images/selfhosted.png)
+
 ## Usage
 
 ### Docker Compose
