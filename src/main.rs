@@ -225,7 +225,6 @@ fn build_html_header(params: &Params) -> String {
             .post-container {{
                 margin-bottom: 1em;
                 padding: 0.5em;
-                border: 1px solid #ccc;
                 text-align: left;
             }}
             .post-text {{
