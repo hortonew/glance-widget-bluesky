@@ -97,6 +97,7 @@ struct Params {
     maybe_since_time: Option<DateTime<Utc>>,
     sort: String,
     title: String,
+    collapse_after: usize,
 }
 
 fn parse_params(query: &HashMap<String, String>) -> Params {
@@ -116,6 +117,7 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
 
     let sort = query.get("sort").cloned().unwrap_or("latest".to_string());
     let title = query.get("title").cloned().unwrap_or("Bluesky".to_string());
+    let collapse_after = query.get("collapse_after").and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
 
     let tags: Vec<String> = tags_param
         .split(',')
@@ -140,6 +142,7 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
         maybe_since_time,
         sort,
         title,
+        collapse_after,
     }
 }
 
@@ -164,7 +167,7 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
     };
 
     match search_bluesky_posts(&client, &token, &params.tags, params.limit, params.maybe_since_time, &params.sort).await {
-        Ok(posts) => build_posts_html(&posts, &mut body),
+        Ok(posts) => build_posts_html(&posts, &mut body, params.collapse_after),
         Err(e) => {
             // Try to regenerate the token and retry the request
             if let Some(new_token) = ensure_bsky_token(&client, &data, &mut body).await {
@@ -178,7 +181,7 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
                 )
                 .await
                 {
-                    Ok(posts) => build_posts_html(&posts, &mut body),
+                    Ok(posts) => build_posts_html(&posts, &mut body, params.collapse_after),
                     Err(e) => body.push_str(&format!("<p>Error searching posts: {}</p>", e)),
                 }
             } else {
@@ -260,11 +263,14 @@ fn show_debug_params(query: &HashMap<String, String>, body: &mut String) {
     }
 }
 
-fn build_posts_html(posts: &[BskyPost], body: &mut String) {
+fn build_posts_html(posts: &[BskyPost], body: &mut String, collapse_after: usize) {
     if posts.is_empty() {
         body.push_str("<p>No posts found for those hashtags.</p>");
     } else {
-        // body.push_str("<h2>Recent Posts</h2>");
+        body.push_str(&format!(
+            r#"<ul class="list collapsible-container" data-collapse-after="{}">"#,
+            collapse_after
+        ));
         for post in posts {
             let post_text = post.record.text.as_deref().unwrap_or("<no text>");
             let author_handle = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
@@ -277,7 +283,7 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String) {
             let reply_count = post.reply_count.unwrap_or(0);
             let repost_count = post.repost_count.unwrap_or(0);
             body.push_str(&format!(
-                r#"<div class="post-container">
+                r#"<li class="post-container">
                      <p class="post-text"><a href="{}">{}</a></p>
                      <p class="post-author">
                        <a href="{}">{}</a>
@@ -290,10 +296,11 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String) {
                        Replies: {} &nbsp;&middot;&nbsp;
                        Reposts: {}
                      </p>
-                   </div>"#,
+                   </li>"#,
                 post_link, post_text, author_link, author_handle, created_at, like_count, quote_count, reply_count, repost_count
             ));
         }
+        body.push_str("</ul>");
     }
 }
 
