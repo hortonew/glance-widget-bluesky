@@ -102,6 +102,7 @@ struct Params {
     author_color: String,
     text_hover_color: String,
     author_hover_color: String,
+    text_visited_color: String,
     maybe_since_time: Option<DateTime<Utc>>,
     sort: String,
     title: String,
@@ -119,6 +120,7 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
     let author_color = query.get("author-color").cloned().unwrap_or("666".to_string());
     let text_hover_color = query.get("text-hover-color").cloned().unwrap_or("000000".to_string());
     let author_hover_color = query.get("author-hover-color").cloned().unwrap_or("666".to_string());
+    let text_visited_color = query.get("text-visited-color").cloned().unwrap_or("666".to_string());
     let since_param = query.get("since").cloned().unwrap_or_default();
     let maybe_since_time = if !since_param.is_empty() {
         parse_relative_time(&since_param)
@@ -153,6 +155,7 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
         author_color,
         text_hover_color,
         author_hover_color,
+        text_visited_color,
         maybe_since_time,
         sort,
         title,
@@ -236,6 +239,10 @@ fn build_html_header(params: &Params) -> String {
                 color: #{text_hover_color};
                 text-decoration: none;
             }}
+            .post-text a:visited {{
+                color: #{text_visited_color};
+                text-decoration: none;
+            }}
             .post-author {{
                 margin: 0.25em 0 0 0;
                 font-size: 0.85em;
@@ -268,6 +275,7 @@ fn build_html_header(params: &Params) -> String {
     "#,
         text_color = params.text_color,
         text_hover_color = params.text_hover_color,
+        text_visited_color = params.text_visited_color,
         author_color = params.author_color,
         author_hover_color = params.author_hover_color
     )
@@ -303,14 +311,14 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String, params: &Params) {
 
             body.push_str(&format!(
                 r#"<li class="post-container">
-                     <p class="post-text"><a href="{}">{}</a></p>"#,
+                     <p class="post-text"><a href="{}" target="_blank">{}</a></p>"#,
                 post_link, post_text
             ));
 
             if !params.hide_author || !params.hide_datetime {
                 body.push_str(r#"<p class="post-author">"#);
                 if !params.hide_author {
-                    body.push_str(&format!(r#"<a href="{}">{}</a>"#, author_link, author_handle));
+                    body.push_str(&format!(r#"<a href="{}" target="_blank">{}</a>"#, author_link, author_handle));
                 }
                 if !params.hide_author && !params.hide_datetime {
                     body.push_str("&nbsp;&middot;&nbsp;");
