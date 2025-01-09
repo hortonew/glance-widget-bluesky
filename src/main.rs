@@ -16,7 +16,7 @@ mod auth;
 use auth::{ensure_bsky_token, load_tokens, BskyState};
 
 fn parse_relative_time(spec: &str) -> Option<DateTime<Utc>> {
-    if !spec.starts_with('-') || spec.len() < 3 {
+    if (!spec.starts_with('-')) || spec.len() < 3 {
         return None;
     }
 
@@ -107,10 +107,10 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
     let tags_param = query.get("tags").cloned().unwrap_or_default();
     let limit = query.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
     let debug = query.get("debug").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
-    let text_color = query.get("text_color").cloned().unwrap_or("000000".to_string());
-    let author_color = query.get("author_color").cloned().unwrap_or("666".to_string());
-    let text_hover_color = query.get("text_hover_color").cloned().unwrap_or("000000".to_string());
-    let author_hover_color = query.get("author_hover_color").cloned().unwrap_or("666".to_string());
+    let text_color = query.get("text-color").cloned().unwrap_or("000000".to_string());
+    let author_color = query.get("author-color").cloned().unwrap_or("666".to_string());
+    let text_hover_color = query.get("text-hover-color").cloned().unwrap_or("000000".to_string());
+    let author_hover_color = query.get("author-hover-color").cloned().unwrap_or("666".to_string());
     let since_param = query.get("since").cloned().unwrap_or_default();
     let maybe_since_time = if !since_param.is_empty() {
         parse_relative_time(&since_param)
@@ -120,10 +120,10 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
 
     let sort = query.get("sort").cloned().unwrap_or("latest".to_string());
     let title = query.get("title").cloned().unwrap_or("Bluesky".to_string());
-    let collapse_after = query.get("collapse_after").and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
-    let hide_stats = query.get("hide_stats").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
-    let hide_datetime = query.get("hide_datetime").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
-    let hide_author = query.get("hide_author").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let collapse_after = query.get("collapse-after").and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
+    let hide_stats = query.get("hide-stats").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let hide_datetime = query.get("hide-datetime").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let hide_author = query.get("hide-author").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
 
     let tags: Vec<String> = tags_param
         .split(',')
