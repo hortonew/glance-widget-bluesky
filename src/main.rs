@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use chrono::{DateTime, Duration, Utc};
+use html_escape::encode_safe;
 use humantime::format_duration;
 
 mod post;
@@ -298,6 +299,7 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String, params: &Params) {
         ));
         for post in posts {
             let post_text = post.record.text.as_deref().unwrap_or("<no text>");
+            let escaped_post_text = encode_safe(&post_text);
             let author_handle = post.author.as_ref().and_then(|a| a.handle.clone()).unwrap_or_default();
             let rkey = post.uri.split('/').last().unwrap_or("");
             let post_link = format!("https://bsky.app/profile/{}/post/{}", author_handle, rkey);
@@ -312,7 +314,7 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String, params: &Params) {
             body.push_str(&format!(
                 r#"<li class="post-container">
                      <p class="post-text"><a href="{}" target="_blank">{}</a></p>"#,
-                post_link, post_text
+                post_link, escaped_post_text
             ));
 
             if !params.hide_author || !params.hide_datetime {

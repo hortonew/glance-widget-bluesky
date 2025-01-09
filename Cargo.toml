@@ -12,3 +12,4 @@ dotenv = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 chrono = "0.4.39"
 humantime = "2.1.0"
+html-escape = "0.2"
