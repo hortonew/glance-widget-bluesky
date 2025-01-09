@@ -143,14 +143,14 @@ pub async fn ensure_bsky_token(client: &Client, data: &web::Data<BskyState>, bod
 }
 
 async fn is_token_valid(token: &str) -> bool {
-    // Implement a simple check to see if the token is still valid
-    // For example, you could make a request to a Bluesky endpoint that requires authentication
-    // and check if it returns a 401 Unauthorized status code
     let client = Client::new();
     let url = "https://bsky.social/xrpc/app.bsky.feed.getTimeline"; // Example endpoint
     let resp = client.get(url).bearer_auth(token).send().await;
     match resp {
-        Ok(response) => response.status() != 401,
-        Err(_) => false,
+        Ok(response) => response.status().is_success(),
+        Err(e) => {
+            println!("Token validation failed: {:?}", e);
+            false
+        }
     }
 }

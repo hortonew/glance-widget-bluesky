@@ -68,19 +68,22 @@ async fn search_bluesky_posts(
         .bearer_auth(token)
         .query(&[("q", &joined_query), ("limit", &limit.to_string()), ("sort", &sort.to_string())])
         .send()
-        .await?
-        .error_for_status()?;
+        .await;
 
-    // Get the raw JSON (for debugging, if needed)
-    let text = resp.text().await?;
-    // println!("DEBUG: raw response body: {text}");
-
-    let mut result: BskySearchPostsResponse = serde_json::from_str(&text)?;
-    // Sort descending by indexed_at
-    result.posts.sort_by_key(|p| p.indexed_at.clone());
-    result.posts.reverse();
-
-    Ok(result.posts)
+    match resp {
+        Ok(response) => {
+            if response.status().is_success() {
+                let text = response.text().await?;
+                let mut result: BskySearchPostsResponse = serde_json::from_str(&text)?;
+                result.posts.sort_by_key(|p| p.indexed_at.clone());
+                result.posts.reverse();
+                Ok(result.posts)
+            } else {
+                Err(Box::new(response.error_for_status().unwrap_err()))
+            }
+        }
+        Err(err) => Err(Box::new(err)),
+    }
 }
 
 struct Params {
@@ -162,7 +165,26 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
 
     match search_bluesky_posts(&client, &token, &params.tags, params.limit, params.maybe_since_time, &params.sort).await {
         Ok(posts) => build_posts_html(&posts, &mut body),
-        Err(e) => body.push_str(&format!("<p>Error searching posts: {}</p>", e)),
+        Err(e) => {
+            // Try to regenerate the token and retry the request
+            if let Some(new_token) = ensure_bsky_token(&client, &data, &mut body).await {
+                match search_bluesky_posts(
+                    &client,
+                    &new_token,
+                    &params.tags,
+                    params.limit,
+                    params.maybe_since_time,
+                    &params.sort,
+                )
+                .await
+                {
+                    Ok(posts) => build_posts_html(&posts, &mut body),
+                    Err(e) => body.push_str(&format!("<p>Error searching posts: {}</p>", e)),
+                }
+            } else {
+                body.push_str(&format!("<p>Error searching posts: {}</p>", e));
+            }
+        }
     }
 
     widget_response(body, &params.title)
