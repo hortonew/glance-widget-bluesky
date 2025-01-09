@@ -84,6 +84,9 @@ curl http://localhost:8081/?tags=rustlang&limit=5&sort=top&since=-24h
 # Build
 docker build -t glance-widget-bluesky:latest .
 
+# Build for specific platform
+docker build --platform=linux/amd64 -t glance-widget-bluesky:latest .
+
 # Test it in docker
 docker run -dit --rm -p 8081:8080 glance-widget-bluesky:latest
 curl http://localhost:8081/?tags=rustlang&limit=5&sort=top&since=-24h
