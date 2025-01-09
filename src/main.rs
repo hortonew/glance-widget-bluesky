@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use chrono::{DateTime, Duration, Utc};
+use humantime::format_duration;
 
 mod post;
 use post::{BskyPost, BskySearchPostsResponse};
@@ -35,6 +36,13 @@ fn parse_relative_time(spec: &str) -> Option<DateTime<Utc>> {
 
     // Return "now - duration"
     Some(Utc::now() - duration)
+}
+
+fn format_relative_time(datetime: &str) -> String {
+    let parsed_datetime = DateTime::parse_from_rfc3339(datetime).unwrap_or_else(|_| Utc::now().into());
+    let secs = Utc::now().signed_duration_since(parsed_datetime).num_seconds();
+    let duration = std::time::Duration::from_secs(secs.max(0) as u64);
+    format!("{} ago", format_duration(duration))
 }
 
 /// Searches Bluesky posts by a naive hashtag approach.
@@ -287,6 +295,7 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String, params: &Params) {
             let post_link = format!("https://bsky.app/profile/{}/post/{}", author_handle, rkey);
             let author_link = format!("https://bsky.app/profile/{}", author_handle);
             let created_at = post.record.created_at.as_deref().unwrap_or("<unknown date>");
+            let relative_time = format_relative_time(created_at);
             let like_count = post.like_count.unwrap_or(0);
             let quote_count = post.quote_count.unwrap_or(0);
             let reply_count = post.reply_count.unwrap_or(0);
@@ -307,7 +316,7 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String, params: &Params) {
                     body.push_str("&nbsp;&middot;&nbsp;");
                 }
                 if !params.hide_datetime {
-                    body.push_str(created_at);
+                    body.push_str(&format!("{} ({})", created_at, relative_time));
                 }
                 body.push_str("</p>");
             }
