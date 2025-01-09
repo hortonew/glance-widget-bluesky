@@ -98,6 +98,9 @@ struct Params {
     sort: String,
     title: String,
     collapse_after: usize,
+    hide_stats: bool,
+    hide_datetime: bool,
+    hide_author: bool,
 }
 
 fn parse_params(query: &HashMap<String, String>) -> Params {
@@ -118,6 +121,9 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
     let sort = query.get("sort").cloned().unwrap_or("latest".to_string());
     let title = query.get("title").cloned().unwrap_or("Bluesky".to_string());
     let collapse_after = query.get("collapse_after").and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
+    let hide_stats = query.get("hide_stats").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let hide_datetime = query.get("hide_datetime").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+    let hide_author = query.get("hide_author").and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
 
     let tags: Vec<String> = tags_param
         .split(',')
@@ -143,6 +149,9 @@ fn parse_params(query: &HashMap<String, String>) -> Params {
         sort,
         title,
         collapse_after,
+        hide_stats,
+        hide_datetime,
+        hide_author,
     }
 }
 
@@ -167,7 +176,7 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
     };
 
     match search_bluesky_posts(&client, &token, &params.tags, params.limit, params.maybe_since_time, &params.sort).await {
-        Ok(posts) => build_posts_html(&posts, &mut body, params.collapse_after),
+        Ok(posts) => build_posts_html(&posts, &mut body, &params),
         Err(e) => {
             // Try to regenerate the token and retry the request
             if let Some(new_token) = ensure_bsky_token(&client, &data, &mut body).await {
@@ -181,7 +190,7 @@ async fn index(query: web::Query<HashMap<String, String>>, data: web::Data<BskyS
                 )
                 .await
                 {
-                    Ok(posts) => build_posts_html(&posts, &mut body, params.collapse_after),
+                    Ok(posts) => build_posts_html(&posts, &mut body, &params),
                     Err(e) => body.push_str(&format!("<p>Error searching posts: {}</p>", e)),
                 }
             } else {
@@ -263,13 +272,13 @@ fn show_debug_params(query: &HashMap<String, String>, body: &mut String) {
     }
 }
 
-fn build_posts_html(posts: &[BskyPost], body: &mut String, collapse_after: usize) {
+fn build_posts_html(posts: &[BskyPost], body: &mut String, params: &Params) {
     if posts.is_empty() {
         body.push_str("<p>No posts found for those hashtags.</p>");
     } else {
         body.push_str(&format!(
             r#"<ul class="list collapsible-container" data-collapse-after="{}">"#,
-            collapse_after
+            params.collapse_after
         ));
         for post in posts {
             let post_text = post.record.text.as_deref().unwrap_or("<no text>");
@@ -282,23 +291,40 @@ fn build_posts_html(posts: &[BskyPost], body: &mut String, collapse_after: usize
             let quote_count = post.quote_count.unwrap_or(0);
             let reply_count = post.reply_count.unwrap_or(0);
             let repost_count = post.repost_count.unwrap_or(0);
+
             body.push_str(&format!(
                 r#"<li class="post-container">
-                     <p class="post-text"><a href="{}">{}</a></p>
-                     <p class="post-author">
-                       <a href="{}">{}</a>
-                       &nbsp;&middot;&nbsp;
-                       {}
-                     </p>
-                     <p class="post-stats">
+                     <p class="post-text"><a href="{}">{}</a></p>"#,
+                post_link, post_text
+            ));
+
+            if !params.hide_author || !params.hide_datetime {
+                body.push_str(r#"<p class="post-author">"#);
+                if !params.hide_author {
+                    body.push_str(&format!(r#"<a href="{}">{}</a>"#, author_link, author_handle));
+                }
+                if !params.hide_author && !params.hide_datetime {
+                    body.push_str("&nbsp;&middot;&nbsp;");
+                }
+                if !params.hide_datetime {
+                    body.push_str(created_at);
+                }
+                body.push_str("</p>");
+            }
+
+            if !params.hide_stats {
+                body.push_str(&format!(
+                    r#"<p class="post-stats">
                        Likes: {} &nbsp;&middot;&nbsp;
                        Quotes: {} &nbsp;&middot;&nbsp;
                        Replies: {} &nbsp;&middot;&nbsp;
                        Reposts: {}
-                     </p>
-                   </li>"#,
-                post_link, post_text, author_link, author_handle, created_at, like_count, quote_count, reply_count, repost_count
-            ));
+                       </p>"#,
+                    like_count, quote_count, reply_count, repost_count
+                ));
+            }
+
+            body.push_str("</li>");
         }
         body.push_str("</ul>");
     }
